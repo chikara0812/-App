@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>封筒式おこづかい管理</title>
+  <style>
+    :root { --bg:#f7f8fb; --card:#ffffff; --text:#0f1216; --muted:#6b7280; --accent:#2563eb; --danger:#ef4444; --ok:#16a34a; --border:#e5e7eb; }
+    * { box-sizing:border-box; }
+    body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:0; }
+    header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    header h1 { font-size:18px; margin:0; }
+    .muted { color:var(--muted); font-size:12px; }
+    .container { max-width:980px; margin:18px auto; padding:0 16px; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+    .grow { flex:1; min-width:220px; }
+    label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
+    input, select, button {
+      width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border);
+      background:#fff; color:var(--text); font-size:14px;
+    }
+    input[type="date"] { padding:8px 10px; }
+    button { background:var(--accent); border:none; color:#fff; font-weight:600; cursor:pointer; }
+    button.secondary { background:#f3f4f6; color:#111827; border:1px solid var(--border); }
+    button.danger { background:var(--danger); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .balance { font-size:28px; font-weight:700; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px; border-bottom:1px solid var(--border); text-align:left; font-size:14px; }
+    th { color:var(--muted); font-weight:600; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border); }
+    .pill.in { background:#dcfce7; color:#14532d; border-color:#86efac; }
+    .pill.out { background:#fee2e2; color:#7f1d1d; border-color:#fca5a5; }
+    .actions { display:flex; gap:8px; }
+    .status { font-size:12px; color:var(--muted); margin-left:auto; }
+    .error { background:#fee2e2; border:1px solid #fca5a5; color:#7f1d1d; padding:10px; border-radius:8px; margin-top:12px; display:none; }
+    .ok { color:var(--ok); font-size:12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+    .right { text-align:right; }
+    .footer { color:var(--muted); font-size:12px; padding:12px 16px; text-align:center; }
+    .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#f3f4f6; border:1px solid var(--border); font-size:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>封筒式おこづかい管理</h1>
+    <div class="muted">入金・出金・用途を記録。履歴と残高を自動計算。</div>
+    <div id="modeBadge" class="badge">保存先: ローカル</div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <div class="grow">
+          <label>封筒を選択 / 作成</label>
+          <div class="row">
+            <select id="envelopeSelect" class="grow"></select>
+            <input id="newEnvelopeName" placeholder="新しい封筒名（例：メイン、趣味、貯金）" />
+            <button id="addEnvelopeBtn">追加</button>
+          </div>
+        </div>
+        <div>
+          <label>現在の残高</label>
+          <div class="balance" id="balance">¥0</div>
+          <div class="muted" id="lastUpdated">更新日時 —</div>
+        </div>
+      </div>
+      <div id="topError" class="error"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">入出金の記録</h3>
+      <div class="grid">
+        <div>
+          <label>種別</label>
+          <select id="type">
+            <option value="in">入金（封筒に入れる）</option>
+            <option value="out">出金（封筒から取り出す）</option>
+          </select>
+        </div>
+        <div>
+          <label>金額（円）</label>
+          <input id="amount" type="number" inputmode="numeric" min="1" placeholder="例：500" />
+        </div>
+        <div>
+          <label>用途（メモ）</label>
+          <input id="note" maxlength="80" placeholder="例：昼食、ゲーム課金、バス代" />
+        </div>
+        <div>
+          <label>日付</label>
+          <input id="date" type="date" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="saveBtn">完了</button>
+        <button id="resetBtn" class="secondary">クリア</button>
+        <div id="saveStatus" class="status"></div>
+      </div>
+      <div id="formError" class="error"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="align-items:center;">
+        <h3 style="margin:0">履歴</h3>
+        <div class="row" style="margin-left:auto; gap:8px;">
+          <select id="filterType">
+            <option value="all">すべて</option>
+            <option value="in">入金のみ</option>
+            <option value="out">出金のみ</option>
+          </select>
+          <input id="filterFrom" type="date" />
+          <input id="filterTo" type="date" />
+          <button id="applyFilter" class="secondary">フィルタ</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>種別</th>
+            <th class="right">金額</th>
+            <th>用途</th>
+            <th class="right">操作</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+      <div id="historyError" class="error"></div>
+    </div>
+
+    <div class="footer">ローカル保存で動作中。Firebaseの設定を入れるとクラウド保存に切り替わります。</div>
+  </div>
+
+  <!-- Firebase SDK（必要なら使う。設定未入力なら自動で無効化） -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // 1) ここにあなたのFirebase設定を入れると、クラウド保存になります。
+    //    未入力のままだとローカル保存で動きます（初期化で止まりません）
+    const firebaseConfig = {
+      apiKey: "",            // 例: "AIzaSyXXXX..."
+      authDomain: "",        // 例: "my-app.firebaseapp.com"
+      projectId: "",         // 例: "my-app"
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    };
+
+    // 保存層（Storage Layer）をローカル/クラウドで差し替え
+    const Storage = (() => {
+      const hasFirebaseConfig = firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.authDomain;
+      const modeBadge = document.getElementById('modeBadge');
+
+      // ローカル実装
+      const Local = {
+        key: 'envelope-app',
+        _load() {
+          try { return JSON.parse(localStorage.getItem(this.key)) || { envelopes:[], transactions:[] }; }
+          catch { return { envelopes:[], transactions:[] }; }
+        },
+        _save(data) { localStorage.setItem(this.key, JSON.stringify(data)); },
+        async listEnvelopes(uid) { return this._load().envelopes; },
+        async addEnvelope(uid, name) {
+          const d = this._load();
+          const id = 'e_' + Date.now();
+          d.envelopes.push({ id, name, createdAt: Date.now() });
+          this._save(d); return id;
+        },
+        async listTransactions(uid, envelopeId) {
+          return this._load().transactions.filter(t => t.envelopeId === envelopeId);
+        },
+        async addTransaction(uid, tx) {
+          const d = this._load();
+          const id = 't_' + Date.now();
+          d.transactions.push({ id, ...tx, createdAt: Date.now() });
+          this._save(d); return id;
+        },
+        async deleteTransaction(uid, id) {
+          const d = this._load();
+          d.transactions = d.transactions.filter(t => t.id !== id);
+          this._save(d);
+        },
+        async updateTransaction(uid, id, patch) {
+          const d = this._load();
+          d.transactions = d.transactions.map(t => t.id === id ? { ...t, ...patch } : t);
+          this._save(d);
+        },
+        async ensureDefaultEnvelope(uid) {
+          const envs = await this.listEnvelopes(uid);
+          if (envs.length === 0) { await this.addEnvelope(uid, 'メイン封筒'); }
+        },
+        mode() { return 'ローカル'; }
+      };
+
+      // Firebase実装（設定が揃っている場合のみ）
+      const Cloud = (() => {
+        let initialized = false;
+        let auth = null;
+        let db = null;
+        let uid = null;
+
+        async function init() {
+          if (initialized) return;
+          firebase.initializeApp(firebaseConfig);
+          auth = firebase.auth();
+          db = firebase.firestore();
+          await auth.signInAnonymously();
+          uid = (await new Promise(resolve => {
+            const unsub = auth.onAuthStateChanged(u => { if (u) { unsub(); resolve(u.uid); } });
+          }));
+          initialized = true;
+          return uid;
+        }
+
+        async function listEnvelopes() {
+          await init();
+          const snap = await db.collection('users').doc(uid).collection('envelopes').orderBy('createdAt','asc').get();
+          return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+        }
+
+        async function addEnvelope(_, name) {
+          await init();
+          const ref = await db.collection('users').doc(uid).collection('envelopes').add({
+            name, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          return ref.id;
+        }
+
+        async function listTransactions(_, envelopeId) {
+          await init();
+          const snap = await db.collection('users').doc(uid).collection('transactions')
+            .where('envelopeId','==',envelopeId)
+            .orderBy('createdAt','desc').get();
+          return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+        }
+
+        async function addTransaction(_, tx) {
+          await init();
+          const ref = await db.collection('users').doc(uid).collection('transactions').add({
+            ...tx, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          return ref.id;
+        }
+
+        async function deleteTransaction(_, id) {
+          await init();
+          await db.collection('users').doc(uid).collection('transactions').doc(id).delete();
+        }
+
+        async function updateTransaction(_, id, patch) {
+          await init();
+          await db.collection('users').doc(uid).collection('transactions').doc(id).update(patch);
+        }
+
+        async function ensureDefaultEnvelope() {
+          await init();
+          const ref = db.collection('users').doc(uid).collection('envelopes');
+          const snap = await ref.limit(1).get();
+          if (snap.empty) { await ref.add({ name:'メイン封筒', createdAt: firebase.firestore.FieldValue.serverTimestamp() }); }
+        }
+
+        function mode() { return 'クラウド'; }
+
+        return { listEnvelopes, addEnvelope, listTransactions, addTransaction, deleteTransaction, updateTransaction, ensureDefaultEnvelope, mode };
+      })();
+
+      // 切替
+      if (hasFirebaseConfig) {
+        modeBadge.textContent = '保存先: クラウド';
+        return Cloud;
+      } else {
+        modeBadge.textContent = '保存先: ローカル';
+        return Local;
+      }
+    })();
+
+    // UIロジック
+    const envelopeSelect = document.getElementById('envelopeSelect');
+    const newEnvelopeName = document.getElementById('newEnvelopeName');
+    const addEnvelopeBtn = document.getElementById('addEnvelopeBtn');
+    const balanceEl = document.getElementById('balance');
+    const lastUpdatedEl = document.getElementById('lastUpdated');
+    const typeEl = document.getElementById('type');
+    const amountEl = document.getElementById('amount');
+    const noteEl = document.getElementById('note');
+    const dateEl = document.getElementById('date');
+    const saveBtn = document.getElementById('saveBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const saveStatusEl = document.getElementById('saveStatus');
+    const formErrorEl = document.getElementById('formError');
+    const historyBody = document.getElementById('historyBody');
+    const historyErrorEl = document.getElementById('historyError');
+    const filterTypeEl = document.getElementById('filterType');
+    const filterFromEl = document.getElementById('filterFrom');
+    const filterToEl = document.getElementById('filterTo');
+    const applyFilterBtn = document.getElementById('applyFilter');
+    const topErrorEl = document.getElementById('topError');
+
+    const yen = n => '¥' + (Number(n) || 0).toLocaleString('ja-JP');
+    const todayStr = () => new Date().toISOString().slice(0,10);
+    dateEl.value = todayStr();
+
+    function showError(el, msg) {
+      el.textContent = msg;
+      el.style.display = msg ? 'block' : 'none';
+    }
+
+    async function initApp() {
+      try {
+        await Storage.ensureDefaultEnvelope('user');
+        const envs = await Storage.listEnvelopes('user');
+        envelopeSelect.innerHTML = '';
+        envs.forEach(e => {
+          const opt = document.createElement('option');
+          opt.value = e.id; opt.textContent = e.name;
+          envelopeSelect.appendChild(opt);
+        });
+        await updateBalanceAndHistory();
+        showError(topErrorEl, '');
+      } catch (e) {
+        showError(topErrorEl, '初期化エラー: ' + e.message);
+      }
+    }
+
+    async function updateBalanceAndHistory() {
+      historyBody.innerHTML = '';
+      showError(historyErrorEl, '');
+      const envelopeId = envelopeSelect.value;
+      if (!envelopeId) return;
+      try {
+        const txs = await Storage.listTransactions('user', envelopeId);
+        // フィルタ適用（クライアント側）
+        const filterType = filterTypeEl.value;
+        const from = filterFromEl.value;
+        const to = filterToEl.value;
+
+        const filtered = txs.filter(t => {
+          if (filterType !== 'all' && t.type !== filterType) return false;
+          if (from && t.date < from) return false;
+          if (to && t.date > to) return false;
+          return true;
+        });
+
+        // 表示順: 日付降順→作成日時降順
+        filtered.sort((a,b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt < b.createdAt ? 1 : -1)));
+
+        let balance = 0;
+        filtered.forEach(t => { balance += (t.type === 'in' ? Number(t.amount) : -Number(t.amount)); });
+        balanceEl.textContent = yen(balance);
+        lastUpdatedEl.textContent = '更新日時 ' + new Date().toLocaleString('ja-JP');
+
+        const frag = document.createDocumentFragment();
+        filtered.forEach(item => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${item.date}</td>
+            <td><span class="pill ${item.type === 'in' ? 'in':'out'}">${item.type === 'in' ? '入金':'出金'}</span></td>
+            <td class="right">${yen(item.amount)}</td>
+            <td>${item.note || '-'}</td>
+            <td class="right">
+              <div class="actions">
+                <button class="secondary" data-edit="${item.id}">編集</button>
+                <button class="danger" data-del="${item.id}">削除</button>
+              </div>
+            </td>
+          `;
+          frag.appendChild(tr);
+        });
+        historyBody.appendChild(frag);
+
+        historyBody.querySelectorAll('button[data-del]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-del');
+            if (confirm('この記録を削除しますか？')) {
+              try { await Storage.deleteTransaction('user', id); await updateBalanceAndHistory(); }
+              catch (e) { showError(historyErrorEl, '削除エラー: ' + e.message); }
+            }
+          });
+        });
+
+        historyBody.querySelectorAll('button[data-edit]').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-edit');
+            try {
+              const txs = await Storage.listTransactions('user', envelopeId);
+              const t = txs.find(x => x.id === id);
+              if (!t) return;
+              const newType = (prompt('種別（in=入金 / out=出金）', t.type) || t.type).trim();
+              const newAmount = parseInt(prompt('金額（円）', t.amount) || t.amount, 10);
+              const newNote = (prompt('用途（メモ）', t.note || '') ?? t.note);
+              const newDate = (prompt('日付（YYYY-MM-DD）', t.date) || t.date).trim();
+              if (!['in','out'].includes(newType) || !(newAmount > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+                alert('入力が正しくありません'); return;
+              }
+              await Storage.updateTransaction('user', id, { type:newType, amount:newAmount, note:newNote, date:newDate });
+              await updateBalanceAndHistory();
+            } catch (e) {
+              showError(historyErrorEl, '編集エラー: ' + e.message);
+            }
+          });
+        });
+
+      } catch (e) {
+        showError(historyErrorEl, '履歴読み込みエラー: ' + e.message);
+      }
+    }
+
+    addEnvelopeBtn.addEventListener('click', async () => {
+      try {
+        const name = newEnvelopeName.value.trim();
+        if (!name) { showError(topErrorEl, '封筒名を入力してください'); return; }
+        await Storage.addEnvelope('user', name);
+        newEnvelopeName.value = '';
+        await initApp();
+      } catch (e) {
+        showError(topErrorEl, '封筒追加エラー: ' + e.message);
+      }
+    });
+
+    envelopeSelect.addEventListener('change', updateBalanceAndHistory);
+
+    saveBtn.addEventListener('click', async () => {
+      showError(formErrorEl, '');
+      saveStatusEl.textContent = '保存中…';
+      try {
+        const envelopeId = envelopeSelect.value;
+        const type = typeEl.value;
+        const amount = parseInt(amountEl.value, 10);
+        const note = noteEl.value.trim();
+        const date = (dateEl.value || todayStr()).trim();
+
+        if (!envelopeId) throw new Error('封筒を選択してください');
+        if (!(amount > 0)) throw new Error('金額は1円以上で入力してください');
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日付の形式が正しくありません');
+
+        await Storage.addTransaction('user', { envelopeId, type, amount, note, date });
+        amountEl.value = ''; noteEl.value = ''; dateEl.value = todayStr();
+        await updateBalanceAndHistory();
+        saveStatusEl.innerHTML = '<span class="ok">保存しました</span>';
+      } catch (e) {
+        saveStatusEl.textContent = '';
+        showError(formErrorEl, '保存エラー: ' + e.message);
+      } finally {
+        setTimeout(() => { saveStatusEl.textContent = ''; }, 1200);
+      }
+    });
+
+    resetBtn.addEventListener('click', () => {
+      typeEl.value = 'in';
+      amountEl.value = '';
+      noteEl.value = '';
+      dateEl.value = todayStr();
+      showError(formErrorEl, '');
+      saveStatusEl.textContent = '';
+    });
+
+    applyFilterBtn.addEventListener('click', updateBalanceAndHistory);
+
+    // 初期化（ローカルでもクラウドでも止まらない）
+    initApp();
+  </script>
+</body>
+</html>
